@@ -30,9 +30,9 @@ func New(ctx context.Context, cfg *config.Configuration) (*App, error) {
 		return nil, fmt.Errorf("create repositories: %w", err)
 	}
 
-	usecases := NewUsecases(repos)
+	usecases := NewUsecases(repos, cfg)
 
-	server := rest.NewServer(
+	server, err := rest.NewServer(
 		rest.Config{
 			Addr:              cfg.HTTP.Addr,
 			ReadTimeout:       cfg.HTTP.ReadTimeout,
@@ -41,9 +41,13 @@ func New(ctx context.Context, cfg *config.Configuration) (*App, error) {
 			IdleTimeout:       cfg.HTTP.IdleTimeout,
 			ShutdownTimeout:   cfg.HTTP.ShutdownTimeout,
 		},
-		handlers.NewHandlers(repos, usecases.Trips),
+		handlers.NewHandlers(repos, cfg.Postgres.QueryTimeout, usecases.Trips),
 		logger,
 	)
+	if err != nil {
+		repos.Close()
+		return nil, fmt.Errorf("create http server: %w", err)
+	}
 
 	return &App{
 		logger: logger,

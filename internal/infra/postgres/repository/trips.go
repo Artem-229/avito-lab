@@ -11,6 +11,7 @@ import (
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -35,15 +36,8 @@ func NewTripsRepository(pool *pgxpool.Pool) *TripsRepository {
 	}
 }
 
-func (t *TripsRepository) CreateTrip(ctx context.Context, trip *entities.Trip) error {
+func (t *TripsRepository) CreateTrip(ctx context.Context, trip *entities.Trip) (*entities.Trip, error) {
 	now := time.Now()
-
-	trip.Status = entities.TripStatusActive
-	trip.StartedAt = now
-	trip.FinishedAt = nil
-	trip.CreatedAt = now
-	trip.UpdatedAt = now
-
 	query, args, err := psql.
 		Insert("trips").
 		Columns(tripColumns...).
@@ -51,24 +45,26 @@ func (t *TripsRepository) CreateTrip(ctx context.Context, trip *entities.Trip) e
 			trip.ID, trip.UserID, trip.DriverID,
 			trip.Start.Latitude, trip.Start.Longitude,
 			trip.End.Latitude, trip.End.Longitude,
-			trip.Price, trip.Status,
-			trip.StartedAt, trip.FinishedAt,
-			trip.CreatedAt, trip.UpdatedAt,
-		).ToSql()
+			trip.Price, entities.TripStatusActive,
+			now, nil,
+			now, now,
+		).
+		Suffix("RETURNING " + strings.Join(tripColumns, ", ")).
+		ToSql()
 	if err != nil {
-		return fmt.Errorf("build insert trip: %w", err)
+		return nil, fmt.Errorf("build insert trip: %w", err)
 	}
 
-	if tx, ok := ExtractTx(ctx); ok {
-		_, err = tx.Exec(ctx, query, args...)
-	} else {
-		_, err = t.pool.Exec(ctx, query, args...)
-	}
+	created, err := scanTrip(extractTx(ctx, t.pool).QueryRow(ctx, query, args...))
 	if err != nil {
-		return fmt.Errorf("create trip: %w", err)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "trips_driver_active_uidx" {
+			return nil, entities.ErrDriverBusy
+		}
+		return nil, fmt.Errorf("create trip: %w", err)
 	}
 
-	return nil
+	return created, nil
 }
 
 func (t *TripsRepository) GetTrip(ctx context.Context, tripID uuid.UUID) (*entities.Trip, error) {
@@ -81,12 +77,7 @@ func (t *TripsRepository) GetTrip(ctx context.Context, tripID uuid.UUID) (*entit
 		return nil, fmt.Errorf("build select trip: %w", err)
 	}
 
-	var row pgx.Row
-	if tx, ok := ExtractTx(ctx); ok {
-		row = tx.QueryRow(ctx, query, args...)
-	} else {
-		row = t.pool.QueryRow(ctx, query, args...)
-	}
+	row := extractTx(ctx, t.pool).QueryRow(ctx, query, args...)
 
 	trip, err := scanTrip(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -114,12 +105,7 @@ func (t *TripsRepository) FinishTrip(ctx context.Context, tripID uuid.UUID) (*en
 		return nil, fmt.Errorf("build update finish trip: %w", err)
 	}
 
-	var row pgx.Row
-	if tx, ok := ExtractTx(ctx); ok {
-		row = tx.QueryRow(ctx, query, args...)
-	} else {
-		row = t.pool.QueryRow(ctx, query, args...)
-	}
+	row := extractTx(ctx, t.pool).QueryRow(ctx, query, args...)
 
 	trip, err := scanTrip(row)
 	if errors.Is(err, pgx.ErrNoRows) {

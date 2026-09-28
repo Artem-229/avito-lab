@@ -10,9 +10,14 @@ import (
 )
 
 type Configuration struct {
-	HTTP     HTTP
-	Log      Log
-	Postgres Postgres
+	HTTP        HTTP
+	Log         Log
+	Postgres    Postgres
+	Idempotency Idempotency
+}
+
+type Idempotency struct {
+	KeyTTL time.Duration `env:"IDEMPOTENCY_KEY_TTL" envDefault:"24h" validate:"gt=0s"`
 }
 
 type HTTP struct {

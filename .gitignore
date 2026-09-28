@@ -6,3 +6,4 @@ trip-service
 *.exe
 
 .DS_Store
+.idea/

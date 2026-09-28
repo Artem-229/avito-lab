@@ -6,16 +6,35 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+const IsolationLevel = pgx.ReadCommitted
+
+type executor interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
 
 type txKey struct{}
 
-func (t *TripsRepository) Do(ctx context.Context, fn func(ctx context.Context) error) error {
-	if _, ok := ExtractTx(ctx); ok {
+type TxManager struct {
+	pool *pgxpool.Pool
+}
+
+func NewTxManager(pool *pgxpool.Pool) *TxManager {
+	return &TxManager{
+		pool: pool,
+	}
+}
+
+func (t *TxManager) Do(ctx context.Context, fn func(ctx context.Context) error) error {
+	if _, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
 		return fn(ctx)
 	}
 
-	tx, err := t.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	tx, err := t.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: IsolationLevel})
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -41,7 +60,9 @@ func (t *TripsRepository) Do(ctx context.Context, fn func(ctx context.Context) e
 	return nil
 }
 
-func ExtractTx(ctx context.Context) (pgx.Tx, bool) {
-	tx, ok := ctx.Value(txKey{}).(pgx.Tx)
-	return tx, ok
+func extractTx(ctx context.Context, pool *pgxpool.Pool) executor {
+	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
+		return tx
+	}
+	return pool
 }

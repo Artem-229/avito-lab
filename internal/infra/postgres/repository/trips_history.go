@@ -35,11 +35,7 @@ func (t *TripsHistoryRepository) CreateRecord(
 		return fmt.Errorf("build insert trip status history: %w", err)
 	}
 
-	if tx, ok := ExtractTx(ctx); ok {
-		_, err = tx.Exec(ctx, query, args...)
-	} else {
-		_, err = t.pool.Exec(ctx, query, args...)
-	}
+	_, err = extractTx(ctx, t.pool).Exec(ctx, query, args...)
 	if err != nil {
 		return fmt.Errorf("create trip status history: %w", err)
 	}

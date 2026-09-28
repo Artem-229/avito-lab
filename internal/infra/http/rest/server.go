@@ -9,7 +9,9 @@ import (
 	"time"
 
 	api "github.com/Artem-229/avito-lab/internal/generated"
+	resthandlers "github.com/Artem-229/avito-lab/internal/infra/http/rest/handlers"
 	"github.com/go-chi/chi/v5"
+	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
 )
 
 type Config struct {
@@ -27,13 +29,27 @@ type Server struct {
 	shutdownTimeout time.Duration
 }
 
-func NewServer(cfg Config, handlers api.ServerInterface, logger *slog.Logger) *Server {
-	router := chi.NewRouter()
+func NewServer(cfg Config, handlers api.ServerInterface, logger *slog.Logger) (*Server, error) {
+	spec, err := api.GetSwagger()
+	if err != nil {
+		return nil, fmt.Errorf("load openapi spec: %w", err)
+	}
+	spec.Servers = nil
+
+	validator := nethttpmiddleware.OapiRequestValidatorWithOptions(spec, &nethttpmiddleware.Options{
+		ErrorHandlerWithOpts: func(_ context.Context, err error, w http.ResponseWriter, r *http.Request, _ nethttpmiddleware.ErrorHandlerOpts) {
+			resthandlers.WriteParamError(w, r, err)
+		},
+	})
 
 	return &Server{
 		server: &http.Server{
-			Addr:              cfg.Addr,
-			Handler:           api.HandlerFromMux(handlers, router),
+			Addr: cfg.Addr,
+			Handler: api.HandlerWithOptions(handlers, api.ChiServerOptions{
+				BaseRouter:       chi.NewRouter(),
+				Middlewares:      []api.MiddlewareFunc{validator},
+				ErrorHandlerFunc: resthandlers.WriteParamError,
+			}),
 			ReadTimeout:       cfg.ReadTimeout,
 			ReadHeaderTimeout: cfg.ReadHeaderTimeout,
 			WriteTimeout:      cfg.WriteTimeout,
@@ -41,7 +57,7 @@ func NewServer(cfg Config, handlers api.ServerInterface, logger *slog.Logger) *S
 		},
 		logger:          logger,
 		shutdownTimeout: cfg.ShutdownTimeout,
-	}
+	}, nil
 }
 
 func (s *Server) Run(ctx context.Context) error {

@@ -13,8 +13,10 @@ import (
 type Repositories struct {
 	pool *pgxpool.Pool
 
+	TxManager    *repository.TxManager
 	Trips        *repository.TripsRepository
 	TripsHistory *repository.TripsHistoryRepository
+	Idempotency  *repository.IdempotencyRepository
 }
 
 func NewRepo(ctx context.Context, cfg *config.Configuration) (*Repositories, error) {
@@ -41,8 +43,10 @@ func NewRepo(ctx context.Context, cfg *config.Configuration) (*Repositories, err
 
 	return &Repositories{
 		pool:         pool,
+		TxManager:    repository.NewTxManager(pool),
 		Trips:        repository.NewTripsRepository(pool),
 		TripsHistory: repository.NewTripsHistoryRepository(pool),
+		Idempotency:  repository.NewIdempotencyRepository(pool),
 	}, nil
 }
 
