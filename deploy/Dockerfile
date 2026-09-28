@@ -12,6 +12,8 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/trip-se
 
 FROM scratch
 
+COPY --from=build /out/trip-service /trip-service
+
 USER 65532:65532
 
 EXPOSE 8080

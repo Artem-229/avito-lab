@@ -45,7 +45,7 @@ curl -i localhost:8080/ready
 пользователя `65532`. `.dockerignore` пропускает в контекст сборки только
 `go.mod`, `go.sum`, `cmd/` и `internal/`.
 
-Размер итогового образа: **TODO МБ** (`docker images trip-service:local`).
+Размер итогового образа: **23 МБ** (`docker images trip-service:local`).
 
 ## Переменные окружения
 
