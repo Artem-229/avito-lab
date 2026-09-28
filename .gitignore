@@ -2,7 +2,7 @@
 .tripgo/
 
 bin/
-trip-service
+/trip-service
 *.exe
 
 .DS_Store
