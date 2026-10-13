@@ -10,6 +10,7 @@ import (
 
 	api "github.com/Artem-229/avito-lab/internal/generated"
 	resthandlers "github.com/Artem-229/avito-lab/internal/infra/http/rest/handlers"
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-chi/chi/v5"
 	nethttpmiddleware "github.com/oapi-codegen/nethttp-middleware"
 )
@@ -35,6 +36,7 @@ func NewServer(cfg Config, handlers api.ServerInterface, logger *slog.Logger) (*
 		return nil, fmt.Errorf("load openapi spec: %w", err)
 	}
 	spec.Servers = nil
+	openapi3.SchemaErrorDetailsDisabled = true
 
 	validator := nethttpmiddleware.OapiRequestValidatorWithOptions(spec, &nethttpmiddleware.Options{
 		ErrorHandlerWithOpts: func(_ context.Context, err error, w http.ResponseWriter, r *http.Request, _ nethttpmiddleware.ErrorHandlerOpts) {
