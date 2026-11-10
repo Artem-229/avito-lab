@@ -1,7 +1,7 @@
 # trip-service
 
 Сервис поездок TripGo: создание, получение и завершение поездки. HTTP API на
-`chi`, хранение в PostgreSQL. Лабораторная работа 1.
+`chi`, хранение в PostgreSQL. Лабораторная работа 2.
 
 ## Требования
 
@@ -27,13 +27,19 @@ make run                 # запустить сервис
 | `make generate` | генерирует типы и chi-сервер из `contracts/openapi/trip-service.openapi.yaml` |
 | `make migrate-down` | откатить последнюю миграцию |
 | `make build` | собрать бинарь в `bin/` |
-| `make test` | тесты с `-race` |
+| `make test` | unit-тесты с `-race` и итоговым покрытием |
+| `make test-integration` | миграции и интеграционные тесты PostgreSQL; нужен `TEST_DATABASE_URL` |
+
+Для интеграционных тестов задайте `TEST_DATABASE_URL` — адрес тестовой базы PostgreSQL
+из окружения `tripgoctl`. Команда применяет миграции к этой базе. Тесты создают записи
+со случайными UUID и удаляют свои данные после проверки. Для запуска используется
+билд-тег `integration`; обычный `make test` подключения к базе не требует.
 
 ## Запуск в Docker
 
 ```bash
 make migrate        # миграции накатываются с хоста
-make docker-build   # образ trip-service:local из deploy/Dockerfile
+make docker-build   # образ service:local из deploy/Dockerfile
 make docker-run     # берёт .env, адрес бд подменяется на host.docker.internal
 curl -i localhost:8080/ready
 ```
@@ -67,7 +73,27 @@ curl -i localhost:8080/ready
 | `DATABASE_QUERY_TIMEOUT` | да | | `statement_timeout` для запросов |
 | `IDEMPOTENCY_KEY_TTL` | нет | `24h` | сколько живёт ключ идемпотентности |
 
-## Решения
+## Архитектура
+
+### Раскладка пакетов
+
+HTTP и usecase разделены по действиям: `trip/create`, `trip/get`, `trip/finish`.
+Интерфейсы зависимостей лежат в `contract.go` у потребителя, конкретные
+реализации связывает `internal/container`. Общие преобразования ответа поездки
+лежат в `internal/http/trip/convert.go`, запись JSON — в `internal/http/response`,
+маппинг ошибок — в `internal/http/domainerror`.
+
+Репозитории разделены по данным: `trip`, `triphistory`, `idempotency`.
+Операции с поездкой находятся в отдельных файлах одного пакета `trip`:
+они используют общие колонки и преобразование строки БД. Отдельные пакеты
+истории и идемпотентности сохраняют существующие границы зависимостей usecase.
+
+Менеджер транзакций лежит в `internal/infra/postgres/transaction`.
+Usecase зависит только от интерфейса `Do`, а репозитории вызывают
+`transaction.ExtractTx`, чтобы использовать транзакцию из контекста или пул.
+Прямой импорт допустим здесь: репозиторий реализует PostgreSQL-хранилище
+и уже зависит от pgx. Выделение дополнительного интерфейса доступа к соединению
+потребует отдельного изменения конструкторов; для переноса оно не требуется.
 
 ### Уровень изоляции
 
@@ -125,3 +151,24 @@ middleware `oapi-codegen/nethttp-middleware` проверяет обязател
 
 Ключ живёт `IDEMPOTENCY_KEY_TTL` (по умолчанию 24 часа). Просроченный ключ
 удаляется при следующем обращении к нему и считается новым.
+
+## Проверка лабораторной 2
+
+`make lint` запускает полный набор линтеров курса. `make generate` обновляет OpenAPI и моки.
+`make test` запускает unit-тесты с `-race` и печатает покрытие; повторная проверка: `go test -race -count=2 ./...`.
+Для интеграционных тестов задайте `TEST_DATABASE_URL` и выполните `make test-integration` дважды.
+
+Зависимости создаются в `internal/container`. `main` читает конфигурацию и запускает приложение.
+Интерфейсы зависимостей объявлены в `contract.go` потребителя: usecase и HTTP-ручки не знают конкретного хранилища.
+Домен проверяет данные поездки и переход active -> completed. HTTP и PostgreSQL зависят от домена; обратные импорты запрещает depguard.
+
+Телеметрия находится в `internal/infra/telemetry`: OTel SDK, OTLP-экспорт, инструментация пула через otelpgx и JSON slog.
+Для `OTEL_EXPORTER_OTLP_PROTOCOL` поддерживаются `http/protobuf` (по умолчанию) и `grpc`.
+Адрес коллектора задаёт `OTEL_EXPORTER_OTLP_ENDPOINT`; sampler — `OTEL_TRACES_SAMPLER` и `OTEL_TRACES_SAMPLER_ARG`.
+`OTEL_SERVICE_NAME` и `OTEL_RESOURCE_ATTRIBUTES` задают атрибуты ресурса; безопасный пример находится в `.env.example`.
+Экспорт работает асинхронно: недоступный коллектор не останавливает HTTP-запросы.
+
+Порядок middleware: Recover -> Tracing -> Logging -> Metrics -> router.
+Логи запросов содержат шаблон маршрута, статус, длительность и trace_id/span_id, тела запросов не записываются.
+Бизнес-счётчики увеличиваются после успешного commit; повтор идемпотентного создания их не меняет.
+Gauge активных поездок читает актуальное число из PostgreSQL, поэтому корректен после рестарта.

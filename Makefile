@@ -8,7 +8,7 @@ GOOSE         := go tool goose -dir migrations
 IMAGE         := trip-service:local
 DOCKER_DB_URL := $(subst 127.0.0.1,host.docker.internal,$(subst localhost,host.docker.internal,$(DATABASE_URL)))
 
-.PHONY: generate run build test migrate migrate-up migrate-down migrate-create docker-build docker-run
+.PHONY: generate run build test test-integration migrate migrate-up migrate-down migrate-create docker-build docker-run lint
 
 generate:
 	mkdir -p $(GEN_DIR)
@@ -18,15 +18,25 @@ generate:
 		-include-operation-ids $(OPERATION_IDS) \
 		-o $(GEN_DIR)/api.gen.go \
 		$(OPENAPI_SPEC)
+	go generate ./internal/...
+
+lint:
+	golangci-lint run
 
 run:
-	go run ./cmd/trip-service
+	go run ./cmd/service
 
 build:
-	go build -o bin/trip-service ./cmd/trip-service
+	go build -o bin/trip-service ./cmd/service
 
 test:
-	go test -race ./...
+	go test -race -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out
+
+test-integration:
+	@test -n "$(TEST_DATABASE_URL)" || (echo "TEST_DATABASE_URL is required"; exit 1)
+	$(GOOSE) postgres "$(TEST_DATABASE_URL)" up
+	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test -tags=integration -race ./internal/repository/... ./internal/infra/postgres/transaction/...
 
 migrate: migrate-up
 
